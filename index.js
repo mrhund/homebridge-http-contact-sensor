@@ -19,10 +19,10 @@ module.exports = function (homebridge) {
 
     api = homebridge;
 
-    homebridge.registerAccessory("homebridge-http-humidity-sensor", "HTTP-HUMIDITY", HTTP_HUMIDITY);
+    homebridge.registerAccessory("homebridge-http-contact-sensor", "HTTP-CONTACT", HTTP_CONTACT);
 };
 
-function HTTP_HUMIDITY(log, config) {
+function HTTP_CONTACT(log, config) {
     this.log = log;
     this.name = config.name;
     this.debug = config.debug || false;
@@ -58,14 +58,14 @@ function HTTP_HUMIDITY(log, config) {
             this.log.warn("Property 'patternGroupToExtract' must be a number! Using default value!");
     }
 
-    this.homebridgeService = new Service.HumiditySensor(this.name);
-    this.homebridgeService.getCharacteristic(Characteristic.CurrentRelativeHumidity)
-        .on("get", this.getHumidity.bind(this));
+    this.homebridgeService = new Service.ContactSensor(this.name);
+    this.homebridgeService.getCharacteristic(Characteristic.ContactSensorState)
+        .on("get", this.getContactState.bind(this));
 
     /** @namespace config.pullInterval */
     if (config.pullInterval) {
-        this.pullTimer = new PullTimer(this.log, config.pullInterval, this.getHumidity.bind(this), value => {
-           this.homebridgeService.setCharacteristic(Characteristic.CurrentRelativeHumidity, value);
+        this.pullTimer = new PullTimer(this.log, config.pullInterval, this.getContactState.bind(this), value => {
+            this.homebridgeService.setCharacteristic(Characteristic.ContactSensorState, value);
         });
         this.pullTimer.start();
     }
@@ -95,7 +95,7 @@ function HTTP_HUMIDITY(log, config) {
     }
 }
 
-HTTP_HUMIDITY.prototype = {
+HTTP_CONTACT.prototype = {
 
     identify: function (callback) {
         this.log("Identify requested!");
@@ -110,8 +110,8 @@ HTTP_HUMIDITY.prototype = {
 
         informationService
             .setCharacteristic(Characteristic.Manufacturer, "Andreas Bauer")
-            .setCharacteristic(Characteristic.Model, "HTTP Humidity Sensor")
-            .setCharacteristic(Characteristic.SerialNumber, "HS01")
+            .setCharacteristic(Characteristic.Model, "HTTP Contact Sensor")
+            .setCharacteristic(Characteristic.SerialNumber, "CS01")
             .setCharacteristic(Characteristic.FirmwareRevision, packageJSON.version);
 
         return [informationService, this.homebridgeService];
@@ -129,11 +129,11 @@ HTTP_HUMIDITY.prototype = {
         characteristic.updateValue(body.value);
     },
 
-    getHumidity: function (callback) {
+    getContactState: function (callback) {
         if (!this.statusCache.shouldQuery()) {
-            const value = this.homebridgeService.getCharacteristic(Characteristic.CurrentRelativeHumidity).value;
+            const value = this.homebridgeService.getCharacteristic(Characteristic.ContactSensorState).value;
             if (this.debug)
-                this.log(`getHumidity() returning cached value ${value}${this.statusCache.isInfinite()? " (infinite cache)": ""}`);
+                this.log(`  getContactState() returning cached value ${value}${this.statusCache.isInfinite()? " (infinite cache)": ""}`);
 
             callback(null, value);
             return;
@@ -144,28 +144,32 @@ HTTP_HUMIDITY.prototype = {
                 this.pullTimer.resetTimer();
 
             if (error) {
-                this.log("getHumidity() failed: %s", error.message);
+                this.log("  getContactState() failed: %s", error.message);
                 callback(error);
             }
             else if (!http.isHttpSuccessCode(response.statusCode)) {
-                this.log("getHumidity() returned http error: %s", response.statusCode);
+                this.log("  getContactState() returned http error: %s", response.statusCode);
                 callback(new Error("Got http error code " + response.statusCode));
             }
             else {
-                let humidity;
+                let contactstate;
                 try {
-                    humidity = utils.extractValueFromPattern(this.statusPattern, body, this.patternGroupToExtract);
+                    contactstate = utils.extractValueFromPattern(this.statusPattern, body, this.patternGroupToExtract);
                 } catch (error) {
-                    this.log("getHumidity() error occurred while extracting humidity from body: " + error.message);
+                    this.log("getContactState() error occurred while extracting state from body: " + error.message);
                     callback(new Error("pattern error"));
                     return;
                 }
 
                 if (this.debug)
-                    this.log("Humidity is currently at %s", humidity);
+                    this.log("State is currently at %s", contactstate);
 
                 this.statusCache.queried();
-                callback(null, humidity);
+                if (contactstate == "1") { // revert answers as my werbservice delivers the other way round
+                    callback(null, 0);
+                } else {
+                    callback(null, 1);
+                }
             }
         });
     },
